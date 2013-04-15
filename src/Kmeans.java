@@ -55,15 +55,15 @@ public class Kmeans {
           br = new BufferedReader(new InputStreamReader(fsdi));
           /* the file structure is clusterID,centroid,feature_vector */
           /* read the centroid file to centroids */
-          int centroidid = 0;
-          while (centroidid < k) {
+          while (true) {
             String line = br.readLine();
+            if (line == null)
+              break;
             int indStart = line.indexOf(',');
             int indEnd = line.indexOf(',', indStart + 1);
             String clusterid = line.substring(0, indStart);
             String feature = line.substring(indEnd + 1);
             centroids[Integer.parseInt(clusterid) - 1] = new Centroid(clusterid, feature);
-            centroidid++;
           }
         }
       } catch (IOException e) {
@@ -185,15 +185,15 @@ public class Kmeans {
           br = new BufferedReader(new InputStreamReader(fsdi));
           /* the file structure is clusterID,centroid,feature_vector */
           /* read the centroid file to centroids */
-          int centroidid = 0;
-          while (centroidid < k) {
+          while (true) {
             String line = br.readLine();
+            if (line == null)
+              break;
             int indStart = line.indexOf(',');
             int indEnd = line.indexOf(',', indStart + 1);
             String clusterid = line.substring(0, indStart);
             String feature = line.substring(indEnd + 1);
             centroids[Integer.parseInt(clusterid) - 1] = new Centroid(clusterid, feature);
-            centroidid++;
           }
         }
       } catch (IOException e) {
@@ -220,6 +220,14 @@ public class Kmeans {
         if (centroid == null)
           centroid = new double[features.length];
         addToCentroid(centroid, features);
+      }
+      /* if no case falls into this cluster, assume the previous centroid is one such case */
+      if (centroid == null) {
+        /* get the centroid of the same cluster id in previous iteration */
+        String[] prevCentroidFeatures = centroids[Integer.parseInt(key.toString()) - 1].features;
+        centroid = new double[prevCentroidFeatures.length];
+        addToCentroid(centroid, prevCentroidFeatures);
+        count = 1;
       }
       /* average to get the new centroid */
       /* this is a fake num to make the file structure consistent to initial centroid */
