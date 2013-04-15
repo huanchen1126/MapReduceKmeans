@@ -44,8 +44,8 @@ public class Kmeans {
       centroids = new Centroid[this.k];
       BufferedReader br = null;
       try {
-        FileSystem fs = FileSystem.get(conf);
         Path path = new Path(job.get(Kmeans.CENTROID_PATH));
+        FileSystem fs = path.getFileSystem(conf);
         FileStatus[] fileStatus = fs.listStatus(path);
         for (FileStatus fstatus : fileStatus) {
           Path p = fstatus.getPath();
@@ -91,7 +91,7 @@ public class Kmeans {
 
       for (int i = 1; i < k; i++) {
         double sim = computeSimilarity(centroids[i].features, features);
-        if (sim > similarity) {
+        if (sim < similarity) {
           cluster = i;
           similarity = sim;
         }
@@ -101,16 +101,13 @@ public class Kmeans {
 
     private double computeSimilarity(String[] features1, String[] features2) {
       double result = 0;
-      double norm1 = 0;
-      double norm2 = 0;
       for (int i = 0; i < features1.length; i++) {
         double f1 = Float.parseFloat(features1[i]);
         double f2 = Float.parseFloat(features2[i]);
-        result += f1 * f2;
-        norm1 += f1 * f1;
-        norm2 += f2 * f2;
+        double abs = Math.abs(f1 - f2);
+        result += abs * abs;
       }
-      return result / (Math.sqrt(norm1) * Math.sqrt(norm2));
+      return result;
     }
 
   }
@@ -177,8 +174,8 @@ public class Kmeans {
       centroids = new Centroid[this.k];
       BufferedReader br = null;
       try {
-        FileSystem fs = FileSystem.get(conf);
         Path path = new Path(job.get(Kmeans.CENTROID_PATH));
+        FileSystem fs = path.getFileSystem(conf);
         FileStatus[] fileStatus = fs.listStatus(path);
         for (FileStatus fstatus : fileStatus) {
           Path p = fstatus.getPath();
@@ -291,9 +288,10 @@ public class Kmeans {
     String outputPath = args[1];
     String centroidPath = args[2];
     String numK = args[3];
+    int k = Integer.parseInt(numK);
     long counter = 0;
     long iteration = 1;
-    while (counter < 10) {
+    while (counter < k) {
       System.out.println("-------Iteration " + iteration + " --------");
       String curoutputPath = outputPath + "/centroid_iteration_" + iteration;
       if (iteration != 1) {
@@ -318,6 +316,5 @@ public class Kmeans {
       System.out.println("-------Iteration " + iteration + " Counter " + counter + " --------");
       iteration++;
     }
-
   }
 }
