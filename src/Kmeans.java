@@ -35,6 +35,9 @@ public class Kmeans {
           Mapper<LongWritable, Text, Text, Text> {
     public Centroid[] centroids;
 
+    /* for checking if centroid has been sent out */
+    public boolean sent;
+
     public int k;
 
     public void configure(JobConf job) {
@@ -80,6 +83,13 @@ public class Kmeans {
 
     public void map(LongWritable key, Text value, OutputCollector<Text, Text> output,
             Reporter reporter) throws IOException {
+      /* if centroids has not been sent out to reducer */
+      if (!sent) {
+        for (Centroid c : centroids) {
+          output.collect(new Text(c.id), new Text("C"));
+        }
+        sent = true;
+      }
       String line = value.toString();
       if (line.startsWith("c"))
         return;
@@ -96,7 +106,7 @@ public class Kmeans {
           similarity = sim;
         }
       }
-      output.collect(new Text(String.valueOf(centroids[cluster].id)), new Text(feature));
+      output.collect(new Text(String.valueOf(centroids[cluster].id)), new Text("1," + feature));
     }
 
     private double computeSimilarity(String[] features1, String[] features2) {
@@ -134,29 +144,37 @@ public class Kmeans {
     public void reduce(Text key, Iterator<Text> values, OutputCollector<Text, Text> output,
             Reporter reporter) throws IOException {
       /* number of samples in this cluster */
-      long count = 1;
-      /* first sample features */
-      String[] features = values.next().toString().split(",");
-      /* initialize new centroid */
-      double[] centroid = new double[features.length];
-      for (int i = 0; i < features.length; i++) {
-        centroid[i] = Float.parseFloat(features[i]);
-      }
+      long count = 0;
+      double[] centroid = null;
+
       while (values.hasNext()) {
-        count++;
-        features = values.next().toString().split(",");
-        /* update centroid */
-        for (int i = 0; i < features.length; i++) {
-          centroid[i] += Float.parseFloat(features[i]);
+        String line = values.next().toString();
+        if (line.equals("C")) {
+          output.collect(key, new Text("C"));
+        } else {
+          int ind = line.indexOf(',');
+          int c = Integer.parseInt(line.substring(0, ind));
+          count += c;
+          String feature = line.substring(ind + 1);
+          String[] features = feature.split(",");
+          if (centroid == null) {
+            /* initialize new centroid */
+            centroid = new double[features.length];
+          }
+          for (int i = 0; i < features.length; i++) {
+            centroid[i] += Float.parseFloat(features[i]);
+          }
         }
       }
-      /* transform centroid to string */
-      String cent = "";
-      for (int i = 0; i < centroid.length; i++) {
-        cent += "," + String.valueOf(centroid[i]);
+      if (centroid != null) {
+        /* transform centroid to string */
+        String cent = "";
+        for (int i = 0; i < centroid.length; i++) {
+          cent += "," + String.valueOf(centroid[i]);
+        }
+        /* output the centroid */
+        output.collect(key, new Text(count + cent));
       }
-      /* output the centroid */
-      output.collect(key, new Text(count + cent));
     }
   }
 
@@ -214,43 +232,56 @@ public class Kmeans {
       double[] centroid = null;
       while (values.hasNext()) {
         String line = values.next().toString();
-        int ind = line.indexOf(',');
-        count += Long.parseLong(line.substring(0, ind));
-        String[] features = line.substring(ind + 1).split(",");
-        if (centroid == null)
-          centroid = new double[features.length];
-        addToCentroid(centroid, features);
-      }
-      /* if no case falls into this cluster, assume the previous centroid is one such case */
-      if (centroid == null) {
-        /* get the centroid of the same cluster id in previous iteration */
-        String[] prevCentroidFeatures = centroids[Integer.parseInt(key.toString()) - 1].features;
-        centroid = new double[prevCentroidFeatures.length];
-        addToCentroid(centroid, prevCentroidFeatures);
-        count = 1;
-      }
-      /* average to get the new centroid */
-      /* this is a fake num to make the file structure consistent to initial centroid */
-      String cent = ",0";
-      for (int i = 0; i < centroid.length; i++) {
-        centroid[i] /= count;
-        cent += "," + centroid[i];
-      }
-      /* get the centroid of the same cluster id in previous iteration */
-      String[] prevCentroidFeatures = centroids[Integer.parseInt(key.toString()) - 1].features;
-      /* detect if this cluster is converged */
-      boolean notConverged = false;
-      for (int i = 0; i < prevCentroidFeatures.length; i++) {
-        double prevCFeature = Double.parseDouble(prevCentroidFeatures[i]);
-        double curCFeature = centroid[i];
-        if (Math.abs(prevCFeature - curCFeature) > this.diff) {
-          notConverged = true;
-          break;
+        if (!line.equals("C")) {
+          int ind = line.indexOf(',');
+          count += Long.parseLong(line.substring(0, ind));
+          String[] features = line.substring(ind + 1).split(",");
+          if (centroid == null)
+            centroid = new double[features.length];
+          addToCentroid(centroid, features);
         }
       }
-      if (!notConverged)
+      if (centroid != null) { // if the cluster is not empty
+        /* average to get the new centroid */
+        /* this is a fake num to make the file structure consistent to initial centroid */
+        String cent = ",0";
+        for (int i = 0; i < centroid.length; i++) {
+          centroid[i] /= count;
+          cent += "," + centroid[i];
+        }
+        /* get the centroid of the same cluster id in previous iteration */
+        String[] prevCentroidFeatures = centroids[Integer.parseInt(key.toString()) - 1].features;
+        /* detect if this cluster is converged */
+        boolean notConverged = false;
+        for (int i = 0; i < prevCentroidFeatures.length; i++) {
+          double prevCFeature = Double.parseDouble(prevCentroidFeatures[i]);
+          double curCFeature = centroid[i];
+          if (Math.abs(prevCFeature - curCFeature) > this.diff) {
+            notConverged = true;
+            break;
+          }
+        }
+        if (!notConverged)
+          reporter.getCounter(Kmeans.KmeansReduce.Counter.CONVERGED).increment(1);
+        output.collect(null, new Text(key.toString() + cent));
+      } else {
+        System.out.println("empty cluster .........");
+        /* get the previous centroid */
+        String id = key.toString();
+        for (Centroid c : centroids) {
+          if (c.id.equals(id)) {
+            centroid = new double[c.features.length];
+            addToCentroid(centroid, c.features);
+            break;
+          }
+        }
+        String cent = ",0";
+        for (int i = 0; i < centroid.length; i++) {
+          cent += "," + centroid[i];
+        }
         reporter.getCounter(Kmeans.KmeansReduce.Counter.CONVERGED).increment(1);
-      output.collect(null, new Text(key.toString() + cent));
+        output.collect(null, new Text(key.toString() + cent));
+      }
     }
 
     /**
@@ -271,20 +302,7 @@ public class Kmeans {
      * the counter for detecting convergence
      */
     public static enum Counter {
-      CONVERGED(0);
-      long counter;
-
-      private Counter(long c) {
-        counter = c;
-      }
-
-      public void increment(long c) {
-        this.counter += c;
-      }
-
-      public long getCounter() {
-        return this.counter;
-      }
+      CONVERGED
     }
   }
 
